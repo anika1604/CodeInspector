@@ -1,0 +1,35 @@
+node_modules/
+dist/
+.env
+*.log
+__pycache__/
+*.pyc
+.venv/
+services/ml-risk-service/models/*.joblib
+services/ml-risk-service/training/dataset.csv
+# Python
+venv/
+.venv/
+env/
+ENV/
+
+__pycache__/
+*.py[cod]
+
+# Environment variables
+.env
+
+
+# Ignore virtual environments anywhere in the repository
+**/venv/
+**/.venv/
+
+# Python
+**/__pycache__/
+*.py[cod]
+
+# Environment files
+**/.env
+
+# Node
+**/node_modules/

@@ -1,0 +1,77 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: codesentry
+      POSTGRES_PASSWORD: codesentry
+      POSTGRES_DB: codesentry
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./services/realtime-server/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codesentry"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  ml-risk-service:
+    build: ./services/ml-risk-service
+    restart: unless-stopped
+    environment:
+      MODEL_VERSION: xgboost-v1
+    ports:
+      - "8001:8001"
+
+  llm-agent-service:
+    build: ./services/llm-agent-service
+    restart: unless-stopped
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_MODEL: claude-sonnet-4-6
+    ports:
+      - "8002:8002"
+
+  realtime-server:
+    build: ./services/realtime-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ml-risk-service:
+        condition: service_started
+      llm-agent-service:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://codesentry:codesentry@postgres:5432/codesentry
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      ML_RISK_SERVICE_URL: http://ml-risk-service:8001
+      LLM_AGENT_SERVICE_URL: http://llm-agent-service:8002
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:4173}
+      PORT: 8000
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    restart: unless-stopped
+    depends_on:
+      - realtime-server
+    ports:
+      - "4173:80"
+
+volumes:
+  pgdata:

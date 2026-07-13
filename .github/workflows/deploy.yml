@@ -1,0 +1,40 @@
+name: Build & Push Images
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service:
+          - { name: realtime-server, path: services/realtime-server }
+          - { name: ml-risk-service, path: services/ml-risk-service }
+          - { name: llm-agent-service, path: services/llm-agent-service }
+          - { name: web, path: apps/web }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.service.path }}
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/codesentry-${{ matrix.service.name }}:latest
+
+# After images are pushed, trigger your host's deploy (Railway/Render/Fly all
+# support "deploy from image" webhooks). See infra/deploy_notes.md for the
+# exact manual/one-time setup — deploy *triggers* differ enough between hosts
+# that hardcoding one here would break for whichever host you don't pick.
