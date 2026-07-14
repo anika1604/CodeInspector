@@ -23,9 +23,12 @@ authRouter.post("/register", async (req, res) => {
     [email, displayName, passwordHash]
   );
 
-  const user = result.rows[0];
-  const token = signToken(user.id);
-  res.status(201).json({ token, user });
+  const row = result.rows[0];
+  const token = signToken(row.id);
+  res.status(201).json({
+    token,
+    user: { id: row.id, email: row.email, displayName: row.display_name },
+  });
 });
 
 authRouter.post("/login", async (req, res) => {

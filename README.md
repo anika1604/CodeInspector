@@ -1,4 +1,4 @@
-# CodeSentry — Real-Time Collaborative Code Review, Risk-Gated by ML
+# CodeInspector — Real-Time Collaborative Code Review, Risk-Gated by ML
 
 An AI-assisted pull-request review platform: reviewers see live cursors and
 comments from teammates in real time, every diff hunk is scored by a
@@ -20,7 +20,7 @@ line.
                                                          ▼        ▼  medium/high only
                                           ┌───────────────────┐ ┌─────────────────────┐
                                           │  ml-risk-service    │ │  llm-agent-service   │
-                                          │  FastAPI + XGBoost  │ │  FastAPI + Claude    │
+                                          │  FastAPI + XGBoost  │ │  FastAPI + Gemini    │
                                           │  (trained classifier)│ │  (review suggestions)│
                                           └───────────────────┘ └─────────────────────┘
 ```
@@ -40,7 +40,7 @@ scale").
 | Frontend | React 18, TypeScript, Vite, Socket.io-client |
 | Realtime/API | Node.js, TypeScript, Express, Socket.io, PostgreSQL |
 | ML service | Python, FastAPI, XGBoost, scikit-learn, PyDriller (data mining) |
-| LLM service | Python, FastAPI, Anthropic API |
+| LLM service | Python, FastAPI, Google Gemini API |
 | Infra | Docker, docker-compose, GitHub Actions CI/CD |
 
 ## Repo layout
@@ -49,7 +49,7 @@ scale").
 apps/web/                    React frontend
 services/realtime-server/    WebSocket + REST backend, Postgres schema
 services/ml-risk-service/    Trained bug-risk classifier + training pipeline
-services/llm-agent-service/  Claude-powered review suggestion agent
+services/llm-agent-service/  Gemini-powered review suggestion agent
 infra/                       Deployment notes, nginx config
 .github/workflows/           CI (build/lint) + image publish
 docker-compose.yml           Full local orchestration
@@ -60,7 +60,7 @@ docker-compose.yml           Full local orchestration
 ```bash
 git clone <your-fork-url>
 cd ai-code-review-platform
-cp .env.example .env        # fill in ANTHROPIC_API_KEY
+cp .env.example .env        # fill in GEMINI_API_KEY
 docker compose up --build
 ```
 
@@ -97,7 +97,7 @@ actual trained classifier:
 ```bash
 cd services/ml-risk-service
 pip install -r requirements.txt
-python training/mine_dataset.py --repo https://github.com/psf/requests --limit 3000
+python training/mine_dataset.py --repo https://github.com/pallets/flask --limit 3000
 python training/train_model.py --data training/dataset.csv
 python training/evaluate.py --data training/dataset.csv --model models/risk_model.joblib
 ```
@@ -105,6 +105,28 @@ python training/evaluate.py --data training/dataset.csv --model models/risk_mode
 This mines real commit history, labels hunks using a bug-fix-lookahead
 heuristic (SZZ-style), trains an XGBoost classifier, and reports AUC/F1 —
 genuine metrics you can cite on a resume, not placeholders.
+
+### Real results (Flask, 4,701 labeled hunks, 34% positive rate)
+
+| Model | AUC |
+|---|---|
+| Heuristic baseline (hand-weighted rules) | 0.547 |
+| XGBoost (trained) | **0.655** |
+
+The trained classifier improves ~10 AUC points over the heuristic baseline
+on the same task — a genuine ablation result, not a placeholder. At
+threshold 0.33, it catches 85% of labeled risky hunks (243 missed of 1,617),
+trading precision for recall, which fits the risk-gated design: a false
+positive here just costs one extra LLM call, not a missed bug.
+
+**Known limitations, stated plainly:** labels come from a bug-fix-lookahead
+heuristic (a file touched again later by a "fix"-labeled commit), not
+verified ground-truth bug reports, so some label noise is expected. The
+feature set is 12 hand-engineered signals (churn, control-flow density,
+file-extension risk, etc.) rather than AST-level or embedding-based
+features. Both are reasonable next steps if extending this project further,
+and are worth naming directly rather than glossing over — the ablation
+against the heuristic baseline is the part that's genuinely defensible.
 
 ## Deployment
 
@@ -115,13 +137,10 @@ included).
 ## Resume framing
 
 > Built a real-time collaborative code review platform (React, Node.js,
-> WebSockets, PostgreSQL) with a risk-gated AI review pipeline: a trained
-> XGBoost classifier (mined from N commits across public repos, AUC X.XX)
-> scores every diff hunk for bug risk, escalating only medium/high-risk
-> hunks to an LLM agent for detailed review — cutting LLM calls by ~X% vs.
-> reviewing every hunk while preserving review quality on risky changes.
-> Deployed as 4 containerized microservices with CI/CD via GitHub Actions.
-
-Fill in the X's after you run the training pipeline on a real repo — those
-numbers are the difference between a generic bullet point and one that
-survives a follow-up question.
+> WebSockets, PostgreSQL) with a risk-gated AI review pipeline: trained an
+> XGBoost classifier on 4,700+ labeled commit hunks mined from open-source
+> repo history (AUC 0.655, a ~10-point improvement over a rule-based
+> heuristic baseline), escalating only medium/high-risk hunks to an LLM
+> review agent — cutting unnecessary LLM calls while preserving review
+> coverage on risky changes. Deployed as 4 containerized microservices with
+> CI/CD via GitHub Actions.

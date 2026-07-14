@@ -41,23 +41,41 @@ def mine_repo(repo_url: str, limit: int) -> list[dict]:
     file_last_touch: dict[str, bool] = {}  # file_path -> was next touch a bugfix?
 
     commits = list(Repository(repo_url).traverse_commits())
+    print(f"  found {len(commits)} commits total in repo history")
     # We need to look ahead, so process in forward order and, for each
     # commit, check whether ANY subsequent commit touching the same file
     # within the next N commits is a bugfix commit.
     total = min(limit, len(commits))
+    print(f"  will process {total} of them")
 
     for i, commit in enumerate(commits[:total]):
         is_future_bugfix_for_file = {}
         lookahead = commits[i + 1 : i + 1 + 50]  # bounded lookahead window
         for future_commit in lookahead:
-            if BUGFIX_PATTERN.search(future_commit.msg or ""):
+            try:
+                if not BUGFIX_PATTERN.search(future_commit.msg or ""):
+                    continue
                 for mf in future_commit.modified_files:
                     if mf.old_path:
                         is_future_bugfix_for_file[mf.old_path] = True
                     if mf.new_path:
                         is_future_bugfix_for_file[mf.new_path] = True
+            except Exception as exc:  # noqa: BLE001
+                # A small number of commits (merge commits with odd parent
+                # structure, encoding issues, etc.) can't be diffed by the
+                # underlying `git diff-tree` call. Skip them rather than
+                # aborting a multi-thousand-commit mining run over one bad
+                # commit — this is expected and fine at low frequency.
+                print(f"  skipping unreadable commit {future_commit.hash[:10]} in lookahead: {exc}")
+                continue
 
-        for mf in commit.modified_files:
+        try:
+            modified_files = list(commit.modified_files)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  skipping unreadable commit {commit.hash[:10]}: {exc}")
+            continue
+
+        for mf in modified_files:
             path = mf.new_path or mf.old_path
             if not path or not mf.diff:
                 continue
