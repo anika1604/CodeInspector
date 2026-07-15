@@ -15,41 +15,53 @@ pullRequestsRouter.post("/", requireAuth, async (req: AuthedRequest, res) => {
     return res.status(400).json({ error: "repositoryFullName, number, title, diffText required" });
   }
 
-  let repoResult = await pool.query("SELECT id FROM repositories WHERE full_name = $1", [
-    repositoryFullName,
-  ]);
-  if (!repoResult.rowCount) {
-    repoResult = await pool.query(
-      "INSERT INTO repositories (full_name) VALUES ($1) RETURNING id",
-      [repositoryFullName]
+  try {
+    let repoResult = await pool.query("SELECT id FROM repositories WHERE full_name = $1", [
+      repositoryFullName,
+    ]);
+    if (!repoResult.rowCount) {
+      repoResult = await pool.query(
+        "INSERT INTO repositories (full_name) VALUES ($1) RETURNING id",
+        [repositoryFullName]
+      );
+    }
+    const repositoryId = repoResult.rows[0].id;
+
+    const prResult = await pool.query(
+      `INSERT INTO pull_requests (repository_id, number, title, author_id, diff_text)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [repositoryId, number, title, req.userId, diffText]
     );
-  }
-  const repositoryId = repoResult.rows[0].id;
+    const pullRequestId = prResult.rows[0].id;
 
-  const prResult = await pool.query(
-    `INSERT INTO pull_requests (repository_id, number, title, author_id, diff_text)
-     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-    [repositoryId, number, title, req.userId, diffText]
-  );
-  const pullRequestId = prResult.rows[0].id;
-
-  const hunks = parseUnifiedDiff(diffText);
-  const hunkIds: string[] = [];
-  for (const hunk of hunks) {
-    const hunkResult = await pool.query(
-      `INSERT INTO diff_hunks (pull_request_id, file_path, hunk_index, hunk_text, start_line, end_line)
+    const hunks = parseUnifiedDiff(diffText);
+    const hunkIds: string[] = [];
+    for (const hunk of hunks) {
+      const hunkResult = await pool.query(
+        `INSERT INTO diff_hunks (pull_request_id, file_path, hunk_index, hunk_text, start_line, end_line)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
       [pullRequestId, hunk.filePath, hunk.hunkIndex, hunk.hunkText, hunk.startLine, hunk.endLine]
     );
-    hunkIds.push(hunkResult.rows[0].id);
+      hunkIds.push(hunkResult.rows[0].id);
+    }
+
+    res.status(201).json({ id: pullRequestId, hunkCount: hunks.length });
+
+    // Fire-and-forget AI analysis pipeline. Results stream to clients via the
+    // PR's socket.io room as they complete, so the UI updates incrementally
+    // instead of blocking on the full pipeline before responding.
+    void analyzePullRequest(pullRequestId, hunks, hunkIds);
+  } catch (err: any) {
+    if (err?.code === "23505") {
+      // Postgres unique_violation — this repo+number combo already exists.
+      return res.status(409).json({
+        error: `PR #${number} already exists for ${repositoryFullName}. Use a different number.`,
+      });
+    }
+    // eslint-disable-next-line no-console
+    console.error("Failed to create pull request", err);
+    return res.status(500).json({ error: "Failed to create pull request" });
   }
-
-  res.status(201).json({ id: pullRequestId, hunkCount: hunks.length });
-
-  // Fire-and-forget AI analysis pipeline. Results stream to clients via the
-  // PR's socket.io room as they complete, so the UI updates incrementally
-  // instead of blocking on the full pipeline before responding.
-  void analyzePullRequest(pullRequestId, hunks, hunkIds);
 });
 
 async function analyzePullRequest(

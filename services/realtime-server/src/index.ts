@@ -37,3 +37,13 @@ httpServer.listen(PORT, () => {
   // eslint-disable-next-line no-console
   console.log(`realtime-server listening on :${PORT}`);
 });
+
+// Safety net: an unhandled promise rejection anywhere in the app (a route
+// missing a try/catch, for instance) would otherwise crash the entire
+// server for every connected client. Log it and keep running instead —
+// the real fix is still proper error handling per-route (see pullRequests.ts),
+// but this keeps one bad request from taking down everyone else's session.
+process.on("unhandledRejection", (reason) => {
+  // eslint-disable-next-line no-console
+  console.error("Unhandled rejection (server stayed up):", reason);
+});
